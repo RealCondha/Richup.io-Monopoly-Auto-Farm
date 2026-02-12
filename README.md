@@ -5,7 +5,7 @@ Automated farming for RichUp.io. Runs in browser console.
 ## Setup
 
 1. Open RichUp.io in your main browser window
-2. Open incognito windows for each alt account
+2. Open incognito windows for each alt account (3 Recommended)
 3. Main creates room, alts join via room code
 4. Paste scripts in console (F12):
    - Main: `main.js`
