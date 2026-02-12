@@ -1,247 +1,228 @@
-// RichUp Bot - Main Account (Winner)
-// Use this on your main account that should win the game
-// This bot plays normally and NEVER bankrupts
-
-(function() {
+// RichUp Bot - Main Account
+(function () {
     'use strict';
-    
-    const CONFIG = {
-        DEBUG: true,
-        BASE_DELAY: 500,
-        MAX_DELAY: 2000,
-        DELAY_MULTIPLIER: 1.5,
-        RETRY_FAST_DELAY: 300,
-        GAME_START_BUTTONS: ["Another game", "Start", "Start Game", "Enter Game", "Join game"],
-        ROLL_BUTTONS: ["Roll the dice", "Roll again"],
-        END_TURN_BUTTONS: ["End turn", "Finish turn"],
-        BUY_XPATH: '/html/body/div[1]/div[5]/div/div[2]/div/div/div[1]/div/div[2]/div[2]/div[1]/div/button/div',
-        TURN_COUNT_KEY: 'richup_main_turn_count'
-    };
 
-    let currentDelay = CONFIG.BASE_DELAY;
-    let lastActionTime = Date.now();
-    let consecutiveNoActions = 0;
-    let botStartTime = Date.now();
-    let totalCycles = 0;
-    let state = {
-        lastAction: null,
-        turnCount: Number(localStorage.getItem(CONFIG.TURN_COUNT_KEY)) || 0
-    };
-    
-    // Stats tracking
-    let gamesCompleted = Number(localStorage.getItem('richup_games_completed')) || 0;
+    const CHECK_MS = 700;        // poll interval
+    const LOBBY_WAIT = 6000;     // wait in lobby before starting
 
-    function log(...args) {
-        if (CONFIG.DEBUG) {
-            console.log(`[RichUp Main Bot]`, ...args);
+    let turnCount = Number(localStorage.getItem('main_turns')) || 0;
+    let games = Number(localStorage.getItem('main_games')) || 0;
+    let lobbyTime = null;
+    let waiting = false;
+    let idleCount = 0;
+    let swatchAttempt = 0;
+
+    const log = msg => console.log('[MAIN] ' + msg);
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // --- click dispatch (full pointer/mouse chain + react fiber walk) ---
+
+    function doClick(el) {
+        if (!el) return;
+        el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+        const rect = el.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1 };
+        const oUp = { ...o, buttons: 0 };
+
+        el.dispatchEvent(new PointerEvent('pointerover', oUp));
+        el.dispatchEvent(new MouseEvent('mouseover', oUp));
+        el.dispatchEvent(new PointerEvent('pointerenter', { ...oUp, bubbles: false }));
+        el.dispatchEvent(new MouseEvent('mouseenter', { ...oUp, bubbles: false }));
+        el.dispatchEvent(new PointerEvent('pointerdown', o));
+        el.dispatchEvent(new MouseEvent('mousedown', o));
+        el.dispatchEvent(new PointerEvent('pointerup', oUp));
+        el.dispatchEvent(new MouseEvent('mouseup', oUp));
+        el.dispatchEvent(new MouseEvent('click', oUp));
+        if (typeof el.click === 'function') el.click();
+
+        // walk dom + react fiber for handler invocation
+        let node = el;
+        for (let d = 0; d < 10 && node; d++) {
+            if (_tryReact(node, oUp)) return;
+            node = node.parentElement;
         }
     }
 
-    function getBuyButton() {
-        // First try: Look for buttons with buy-related text
-        const buttons = getAllButtons();
-        for (const button of buttons) {
-            const text = button.textContent?.trim()?.toLowerCase() || '';
-            if (text.includes('buy') || text.includes('purchase') || text.includes('acquire')) {
-                log('Found buy button by text:', button.textContent.trim());
-                return button;
+    function _tryReact(el, o) {
+        const fe = {
+            type: 'click', target: el, currentTarget: el,
+            clientX: o.clientX, clientY: o.clientY,
+            bubbles: true, cancelable: true, button: 0,
+            preventDefault() { }, stopPropagation() { }, persist() { },
+            nativeEvent: new MouseEvent('click', o),
+            isDefaultPrevented() { return false },
+            isPropagationStopped() { return false }
+        };
+        for (const k of Object.keys(el)) {
+            if (k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$')) {
+                const p = el[k]; if (!p) continue;
+                let found = false;
+                if (typeof p.onClick === 'function') { try { p.onClick(fe); found = true; } catch (e) { } }
+                if (typeof p.onMouseDown === 'function') { try { p.onMouseDown({ ...fe, type: 'mousedown' }); found = true; } catch (e) { } }
+                if (found) return true;
+            }
+            if (k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$')) {
+                let f = el[k], d = 0;
+                while (f && d < 15) {
+                    const mp = f.memoizedProps;
+                    if (mp) {
+                        if (typeof mp.onClick === 'function') { try { mp.onClick(fe); } catch (e) { } return true; }
+                        if (typeof mp.onMouseDown === 'function') { try { mp.onMouseDown({ ...fe, type: 'mousedown' }); } catch (e) { } return true; }
+                    }
+                    f = f.return; d++;
+                }
             }
         }
-        
-        // Second try: XPath fallback
-        try {
-            const xpathBtn = document.evaluate(
-                CONFIG.BUY_XPATH, 
-                document, 
-                null, 
-                XPathResult.FIRST_ORDERED_NODE_TYPE, 
-                null
-            ).singleNodeValue;
-            if (xpathBtn) {
-                log('Found buy button by XPath');
-                return xpathBtn;
-            }
-        } catch (e) {
-            // XPath failed, continue
+        return false;
+    }
+
+    // --- button helpers ---
+
+    function norm(s) { return s.trim().replace(/\s+/g, ' ').toLowerCase(); }
+
+    function getBtn(match) {
+        for (const btn of document.querySelectorAll('button')) {
+            if (btn.disabled) continue;
+            const tl = norm(btn.textContent);
+            const rect = btn.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            if (typeof match === 'string' && tl === match.toLowerCase()) return btn;
+            if (typeof match === 'function' && match(tl)) return btn;
         }
-        
-        // Third try: Check for button in specific containers
-        const possibleContainers = [
-            document.querySelector('[class*="buy"] button'),
-            document.querySelector('[class*="property"] button'),
-            document.querySelector('[class*="purchase"] button'),
-            document.querySelector('button[class*="buy"]'),
-            document.querySelector('button[class*="purchase"]')
-        ];
-        
-        for (const btn of possibleContainers) {
-            if (btn && btn.offsetParent !== null) { // Check if visible
-                log('Found buy button by class selector');
-                return btn;
-            }
-        }
-        
         return null;
     }
 
-    function safeClick(element, description) {
-        if (!element) return false;
-        try {
-            element.click();
-            log(`Clicked: ${description}`);
+    function clickBtn(match, label) {
+        const btn = getBtn(match);
+        if (btn) { doClick(btn); log('Clicked: ' + label); idleCount = 0; return true; }
+        return false;
+    }
+
+    // --- swatch detection (appearance selection screen) ---
+    // swatches are small <button> elements containing SVG icons
+
+    function findSwatches() {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let textNode;
+        while (textNode = walker.nextNode()) {
+            if (textNode.textContent.toLowerCase().includes('select your')) {
+                let container = textNode.parentElement;
+                for (let lvl = 0; lvl < 6 && container; lvl++) {
+                    const sw = filterSwatchButtons(container.querySelectorAll('button:not([disabled])'));
+                    if (sw.length >= 4) return sw;
+                    container = container.parentElement;
+                }
+                break;
+            }
+        }
+        // fallback: scan all buttons with inline color + svg
+        return filterSwatchButtons(document.querySelectorAll('button:not([disabled])'), true);
+    }
+
+    function filterSwatchButtons(buttons, requireColor) {
+        return [...buttons].filter(btn => {
+            const r = btn.getBoundingClientRect();
+            if (r.width < 15 || r.width > 90 || r.height < 15 || r.height > 90) return false;
+            if (!btn.querySelector('svg')) return false;
+            if (btn.textContent.trim().length > 5) return false;
+            if (requireColor) {
+                const c = btn.style.color;
+                if (!c || !c.startsWith('rgb')) return false;
+            }
             return true;
-        } catch (e) {
-            log(`Failed to click ${description}:`, e.message);
-            return false;
-        }
+        });
     }
 
-    function getAllButtons() {
-        try {
-            return Array.from(document.getElementsByTagName('button'));
-        } catch (e) {
-            log('Error getting buttons:', e.message);
-            return [];
-        }
+    // checks for visible join button
+    function onColorScreen() {
+        const joinBtn = getBtn('join game') || getBtn(t => t.includes('join game'));
+        return !!joinBtn;
     }
 
-    function shouldResetTurnCount(buttonText) {
-        return CONFIG.GAME_START_BUTTONS.some(btn => buttonText.includes(btn));
-    }
+    // --- main loop ---
 
-    function isRollButton(text) {
-        return CONFIG.ROLL_BUTTONS.some(btn => text.toLowerCase().includes(btn.toLowerCase()));
-    }
+    async function bot() {
+        log('Running | games: ' + games + ' | turns: ' + turnCount);
+        while (true) {
+            try {
+                if (clickBtn('another game', 'Another game')) {
+                    games++; localStorage.setItem('main_games', String(games));
+                    turnCount = 0; localStorage.setItem('main_turns', '0');
+                    waiting = false; lobbyTime = null; swatchAttempt = 0;
+                    log('Game ' + games + ' done');
+                    await sleep(800); continue;
+                }
 
-    function isEndTurnButton(text) {
-        return CONFIG.END_TURN_BUTTONS.some(btn => text.toLowerCase().includes(btn.toLowerCase()));
-    }
+                // color selection + join
+                if (onColorScreen()) {
+                    const swatches = findSwatches();
+                    if (swatches.length >= 4) {
+                        const idx = swatchAttempt % swatches.length;
+                        log('Swatch ' + idx + '/' + swatches.length + ' (attempt ' + swatchAttempt + ')');
+                        doClick(swatches[idx]);
+                        await sleep(800);
 
-    function processButtons() {
-        const buttons = getAllButtons();
-        let actionTaken = false;
-        let actionsThisCycle = [];
+                        const joinBtn = getBtn('join game') || getBtn(t => t.includes('join game'));
+                        if (joinBtn) {
+                            doClick(joinBtn);
+                            log('Join game');
+                            await sleep(2000);
 
-        // Priority 1: Check for buy button (must buy properties!)
-        const buyButton = getBuyButton();
-        if (buyButton) {
-            if (safeClick(buyButton, 'Buy Property')) {
-                actionTaken = true;
-                actionsThisCycle.push('buy');
-                // Return early - don't roll until buy is handled
-                return { actionTaken, actionsThisCycle };
-            }
-        }
-
-        // Priority 2: Process all other buttons
-        for (const button of buttons) {
-            const buttonText = button.textContent?.trim() || '';
-            if (!buttonText) continue;
-
-            // Check for game start buttons (reset turn count)
-            if (shouldResetTurnCount(buttonText)) {
-                state.turnCount = 0;
-                localStorage.setItem(CONFIG.TURN_COUNT_KEY, '0');
-                if (safeClick(button, `Game Control: ${buttonText}`)) {
-                    actionTaken = true;
-                    actionsThisCycle.push('game-start');
-                    // Track game completion when starting a new game
-                    if (buttonText.toLowerCase().includes('another')) {
-                        gamesCompleted++;
-                        localStorage.setItem('richup_games_completed', String(gamesCompleted));
-                        log(`🎮 Game ${gamesCompleted} completed! Starting new game...`);
+                            if (!onColorScreen()) {
+                                log('Joined');
+                                swatchAttempt = 0;
+                            } else {
+                                log('Color taken, trying next');
+                                swatchAttempt++;
+                                await sleep(3000);
+                            }
+                        }
                     }
+                    await sleep(CHECK_MS); continue;
                 }
-                continue;
-            }
 
-            // Check for roll dice
-            if (isRollButton(buttonText)) {
-                if (safeClick(button, `Roll: ${buttonText}`)) {
-                    actionTaken = true;
-                    state.turnCount++;
-                    localStorage.setItem(CONFIG.TURN_COUNT_KEY, String(state.turnCount));
-                    log(`Turn count: ${state.turnCount}`);
-                    actionsThisCycle.push('roll');
+                // start game after lobby wait
+                const startBtn = getBtn(t => t === 'start game' || t === 'start');
+                if (startBtn) {
+                    if (!waiting) {
+                        waiting = true; lobbyTime = Date.now();
+                        log('Lobby, waiting ' + (LOBBY_WAIT / 1000) + 's');
+                    }
+                    if (Date.now() - lobbyTime >= LOBBY_WAIT) {
+                        doClick(startBtn); log('Started game');
+                        waiting = false; lobbyTime = null; turnCount = 0;
+                        await sleep(1500);
+                    }
+                    await sleep(CHECK_MS); continue;
+                } else { waiting = false; }
+
+                // gameplay actions
+                let acted = false;
+                if (!acted && clickBtn(t => t === 'roll the dice' || t === 'roll again', 'Roll')) {
+                    turnCount++; localStorage.setItem('main_turns', String(turnCount));
+                    log('Turn ' + turnCount); acted = true; await sleep(800);
                 }
-                continue;
-            }
-
-            // Check for end turn
-            if (isEndTurnButton(buttonText)) {
-                if (safeClick(button, `End Turn: ${buttonText}`)) {
-                    actionTaken = true;
-                    actionsThisCycle.push('end-turn');
+                if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) {
+                    acted = true; await sleep(500);
                 }
-                continue;
-            }
-        }
+                if (!acted && clickBtn('end turn', 'End turn')) { acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) {
+                    acted = true; await sleep(500);
+                }
+                if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) {
+                    acted = true; await sleep(500);
+                }
 
-        return { actionTaken, actionsThisCycle };
-    }
-
-    function calculateNextDelay(actionTaken) {
-        if (actionTaken) {
-            // Action taken - reset to base delay
-            consecutiveNoActions = 0;
-            return CONFIG.BASE_DELAY;
-        } else {
-            // No action - increase delay up to max
-            consecutiveNoActions++;
-            const newDelay = Math.min(
-                CONFIG.BASE_DELAY * Math.pow(CONFIG.DELAY_MULTIPLIER, consecutiveNoActions),
-                CONFIG.MAX_DELAY
-            );
-            
-            // If stuck for too long, retry faster
-            if (consecutiveNoActions > 5) {
-                log('No actions for 5+ cycles, retrying faster');
-                return CONFIG.RETRY_FAST_DELAY;
-            }
-            
-            return Math.round(newDelay);
+                if (!acted) {
+                    idleCount++;
+                    if (idleCount % 60 === 0) log('Idle ' + Math.round(idleCount * CHECK_MS / 1000) + 's');
+                }
+                await sleep(CHECK_MS);
+            } catch (e) { console.error('[MAIN]', e); await sleep(CHECK_MS); }
         }
     }
 
-    function runBot() {
-        // Infinite farming - no max runtime
-        totalCycles++;
-        
-        // Log every 1000 cycles to show it's alive
-        if (totalCycles % 1000 === 0) {
-            const runtime = Math.round((Date.now() - botStartTime) / 1000 / 60);
-            log(`🔄 Running for ${runtime} mins | ${totalCycles} cycles | ${gamesCompleted} games completed`);
-        }
-        
-        try {
-            const { actionTaken, actionsThisCycle } = processButtons();
-            
-            if (actionTaken) {
-                lastActionTime = Date.now();
-                if (CONFIG.DEBUG) {
-                    log(`Actions this cycle: ${actionsThisCycle.join(', ') || 'none'}`);
-                }
-            }
-
-            currentDelay = calculateNextDelay(actionTaken);
-            
-            if (!actionTaken && CONFIG.DEBUG) {
-                log(`No action, waiting ${currentDelay}ms (attempt ${consecutiveNoActions})`);
-            }
-
-        } catch (error) {
-            log('Error in bot loop:', error.message);
-            currentDelay = CONFIG.RETRY_FAST_DELAY;
-        }
-
-        // Schedule next run
-        setTimeout(runBot, currentDelay);
-    }
-
-    // Start the bot
-    log('RichUp Main Bot started!');
-    log('Turn count:', state.turnCount);
-    log('This bot will play to WIN (no bankruptcy)');
-    runBot();
-
+    bot();
 })();
