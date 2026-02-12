@@ -1,63 +1,77 @@
 # RichUp Bot
 
-Automated farming for RichUp.io. Runs in browser console.
-
-## Setup
-
-1. Open RichUp.io in your main browser window
-2. Open incognito windows for each alt account (3 Recommended)
-3. Main creates room, alts join via room code
-4. Paste scripts in console (F12):
-   - Main: `main.js`
-   - Alts: `alts.js`
-5. Done. Runs infinite loop.
+Automated coin farming for [RichUp.io](https://richup.io). Runs entirely from browser console — no extensions, no downloads.
 
 ## How It Works
 
-- **main.js** - Your primary account. Plays to win, never bankrupts.
-- **alts.js** - Sacrificial accounts. Play 70 turns, auto-bankrupt, rejoin via "Another game".
-- Main wins → gets coins → cycle repeats.
+You run one main account that plays to win, and at least 3 alt accounts that feed it. Alts play normally for 70 turns, then auto-bankrupt — transferring their assets to whoever's left. Main never bankrupts, just keeps collecting. After each game, all tabs auto-rejoin and the cycle repeats.
+
+## Setup
+
+1. Open RichUp.io in your main browser
+2. Open **separate incognito windows** for each alt (minimum 3 recommended)
+   - Each alt MUST be in its own incognito window or browser profile — tabs in the same window share storage and will conflict
+3. Main creates a private room, alts join via room link
+4. Set **starting money to max** in game settings for faster farming
+5. Open console (F12 → Console) and paste:
+   - Main window → `main.js`
+   - Each alt window → `alts.js`
+6. Bot handles everything from here — color selection, joining, gameplay, bankruptcy, and rejoining
+
+## Scripts
+
+| Script | Role | Behavior |
+|--------|------|----------|
+| `main.js` | Primary account | Plays to win. Rolls, buys everything, never bankrupts. Handles lobby start. |
+| `alts.js` | Feeder accounts | Plays 70 turns then auto-bankrupts. Preserves identity across games. Any alt that ends up as host will start the next game. |
 
 ## Config
 
-Edit top of either file:
+Top of each file:
 
 ```javascript
-const CONFIG = {
-    DEBUG: true,              // Console spam
-    BASE_DELAY: 500,          // Polling speed (ms)
-    MAX_DELAY: 2000,          // Idle throttle
-    BANKRUPT_THRESHOLD: 70,   // Alts only
-}
+// alts.js
+const MY_COLOR = -1;           // color index (-1 = auto-assign)
+const BANKRUPT_AFTER = 70;     // turns before auto-bankruptcy
+const CHECK_MS = 700;          // poll interval (ms)
+
+// main.js  
+const LOBBY_WAIT = 6000;       // wait in lobby before auto-starting (ms)
 ```
 
-## Features
+## Console Output
 
-- Multi-method button detection (text, XPath, CSS)
-- Buy priority (buys before rolling)
-- Adaptive timing (500ms-2000ms)
-- Lag prevention (2hr safety, cycle logging)
-- Persistent stats (localStorage)
-- Modal handling (4 methods for bankruptcy)
+```
+[MAIN] Running | games: 5 | turns: 12
+[MAIN] Joined
+[MAIN] Roll
+[alt_a3f2] Turn 45/70
+[alt_a3f2] Bankrupted
+[alt_x9k1] Swatch 3/11 (attempt 0)
+[alt_x9k1] Joined
+```
 
-## Stats
+## Technical Details
 
-Check console for:
-- `Game X completed!` 
-- `Running for X mins | Y cycles | Z games`
+- Full pointer/mouse event chain for React compatibility (hover → pointerdown → mousedown → pointerup → mouseup → click)
+- React fiber tree walk to invoke internal handlers (onClick, onMouseDown, onPointerDown) up to 15 levels deep
+- Swatch detection via DOM tree walk — finds the "Select your appearance" heading container, filters child buttons by size + SVG content
+- Per-alt isolation using sessionStorage with random IDs — multiple alts don't interfere
+- Identity persistence — alt names/settings are captured and restored between games
 
 ## Reset
 
 ```javascript
 localStorage.clear()
+sessionStorage.clear()
 location.reload()
 ```
 
-## Notes
+## Tips
 
-- Use incognito windows for alts to stay logged in separately
-- Room stays open via "Another game"
-- Alts need 70 turns before bankruptcy kicks in
-- Main needs to be last one standing to win
+- Use at least **3 alts** for consistent wins — with fewer, the main might not always be last standing
+- Set starting money to **max** — more money = more assets to collect when alts bankrupt
+- If an alt gets stuck on the color screen, just refresh and re-paste the script
+- Room persists via "Another game" — you don't need to manually create new rooms
 
-**Use at your own risk. Violates ToS probably.**
+**Use at your own risk.**
