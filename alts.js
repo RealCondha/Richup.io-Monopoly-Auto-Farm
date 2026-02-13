@@ -19,6 +19,7 @@
     let swatchAttempt = 0;
     let lobbyTime = null;
     let idleCount = 0;
+    let wasDisconnected = false;
 
     // hash alt id for deterministic color offset
     let h = 0;
@@ -26,7 +27,7 @@
     const autoOffset = Math.abs(h);
 
     const log = msg => console.log(`[${ALT_ID}] ${msg}`);
-    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const sleep = ms => new Promise(r => setTimeout(r, ms + Math.random() * 200));
 
     // --- identity persistence (name/settings across games) ---
 
@@ -51,8 +52,8 @@
 
     function doClick(el) {
         if (!el) return;
-        el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
         const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;
         const o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1 };
@@ -67,11 +68,10 @@
         el.dispatchEvent(new PointerEvent('pointerup', oUp));
         el.dispatchEvent(new MouseEvent('mouseup', oUp));
         el.dispatchEvent(new MouseEvent('click', oUp));
-        if (typeof el.click === 'function') el.click();
 
         // walk dom + react fiber for handler invocation
         let node = el;
-        for (let d = 0; d < 10 && node; d++) {
+        for (let d = 0; d < 8 && node; d++) {
             if (_tryReact(node, oUp)) return;
             node = node.parentElement;
         }
@@ -114,6 +114,12 @@
 
     // --- button helpers ---
 
+    const BLACKLIST = [
+        'share', 'copy', 'invite', 'sound', 'spectate', 'return to lobby',
+        'go to lobby', 'get more', 'change appearance', 'login', 'sign up',
+        'see all', 'private room', 'log in', 'settings', 'appearance'
+    ];
+
     function norm(s) { return s.trim().replace(/\s+/g, ' ').toLowerCase(); }
 
     function getBtn(match) {
@@ -122,6 +128,7 @@
             const tl = norm(btn.textContent);
             const rect = btn.getBoundingClientRect();
             if (rect.width <= 0 || rect.height <= 0) continue;
+            if (BLACKLIST.some(b => tl.includes(b))) continue;
             if (typeof match === 'string' && tl === match.toLowerCase()) return btn;
             if (typeof match === 'function' && match(tl)) return btn;
         }
@@ -130,7 +137,14 @@
 
     function clickBtn(match, label) {
         const btn = getBtn(match);
-        if (btn) { doClick(btn); log('Clicked: ' + label); idleCount = 0; return true; }
+        if (btn) { doClick(btn); log(label); idleCount = 0; return true; }
+        return false;
+    }
+
+    // --- disconnect detection + recovery ---
+
+    // disconnect detection — disabled until we can identify exact overlay element
+    function isDisconnected() {
         return false;
     }
 
@@ -212,7 +226,6 @@
         if (!joinBtn) return false;
 
         doClick(joinBtn);
-        log('Join game');
         await sleep(2500);
 
         if (!onColorScreen()) {
@@ -271,10 +284,32 @@
 
     async function bot() {
         captureIdentity();
+        sessionStorage.setItem('room_url', location.href);
         log('Running | turns: ' + turnCount);
 
         while (true) {
             try {
+                // disconnect detection — pause until resolved
+                if (isDisconnected()) {
+                    if (!wasDisconnected) {
+                        document.title = '[!] DISCONNECTED';
+                        log('Connection lost — paused. Verify in a new tab.');
+                        wasDisconnected = true;
+                    }
+                    await sleep(3000);
+                    if (!isDisconnected()) {
+                        document.title = 'Richup.io';
+                        log('Reconnected — resuming');
+                        wasDisconnected = false;
+                    }
+                    continue;
+                }
+                if (wasDisconnected) {
+                    document.title = 'Richup.io';
+                    log('Reconnected — resuming');
+                    wasDisconnected = false;
+                }
+
                 if (clickBtn('another game', 'Another game')) {
                     turnCount = 0; bankruptTries = 0; swatchAttempt = 0;
                     sessionStorage.setItem(ALT_ID + '_turns', '0');
@@ -331,7 +366,12 @@
 
                 if (!acted) {
                     idleCount++;
-                    if (idleCount % 60 === 0) log('Idle ' + Math.round(idleCount * CHECK_MS / 1000) + 's');
+                    if (idleCount % 250 === 0) {
+                        log('Idle ' + Math.round(idleCount * CHECK_MS / 1000) + 's');
+                        const btns = [...document.querySelectorAll('button')].filter(
+                            b => b.getBoundingClientRect().width > 0 && !b.disabled);
+                        log('Visible buttons: ' + btns.map(b => norm(b.textContent).slice(0, 25)).join(', '));
+                    }
                 }
                 await sleep(CHECK_MS);
             } catch (e) {
