@@ -37,7 +37,9 @@ You need a userscript manager to run this bot. We recommend:
 3.  Click **▶ Main**.
 4.  Create a "Private Game".
 5.  Set the room to **4 Players**.
-6.  Copy the Invite Link.
+6.  6.  **Important:** Set **Starting Money** to **Max**.
+    *   *This prevents the bot from running out of money and getting stuck early.*
+7.  Copy the Invite Link.
 
 ### 2. Alt Accounts
 1.  Open a new **Incognito Window** (or a different browser profile).
