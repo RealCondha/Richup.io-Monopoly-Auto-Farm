@@ -64,10 +64,32 @@ You need a userscript manager to run this bot. We recommend:
 
 ---
 
+### 🛡️ Cloudflare Bypass & Anti-Bot
+RichUp uses Cloudflare Turnstile to stop bots. You have two ways to handle this:
+
+#### Option A: NopeCHA Extension (Recommended/Free)
+1.  Install the **NopeCHA: CAPTCHA Solver** extension in your browser.
+    *   This gives you **~100 free solves per 24 hours**.
+    *   This is enough for most users as the bot only needs to verify occasionally.
+2.  **Open the "Keep-Alive" Tab:**
+    *   Click **↻ Keep-Alive Tab** in the bot panel.
+    *   Leave this tab Open (do not close it, just keep it in the background).
+    *   When Cloudflare appears, **NopeCHA** will automatically solve it for you.
+    *   The bot detects the solve and reloads the page to continue farming.
+
+#### Option B: API Key (Paid Fallback)
+If you run out of free credits or want to run 24/7 with many instances:
+1.  Get an API Key from [2Captcha](https://2captcha.com/).
+2.  In the Bot Panel, click **🔑 Set API Key**.
+3.  Paste your key.
+4.  The bot will now use your key to solve captchas automatically without needing the extension (though the extension is still faster/better).
+
+---
+
 ## 🧩 Troubleshooting
 
 *   **Bot not clicking?** Ensure the page is focused or at least visible on one monitor.
-*   **Cloudflare Loop?** Use the "Keep-Alive" tab feature. If it persists, get a [2Captcha API Key](https://2captcha.com/) and enter it via the **🔑 Set API Key** button in the panel to automate solving.
+*   **Cloudflare Loop?** Make sure you have the **Keep-Alive Tab** open and either the **Extension installed** OR an **API Key** set.
 
 ---
 
