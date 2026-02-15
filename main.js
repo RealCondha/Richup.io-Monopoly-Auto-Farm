@@ -1,29 +1,56 @@
-// RichUp Bot - Main Account
+// ═══════════════════════════════════════════════════════
+// RICHUP MAIN BOT (Console Version)
+// ═══════════════════════════════════════════════════════
+
 (function () {
     'use strict';
 
-    const CHECK_MS = 700;        // poll interval
-    const LOBBY_WAIT = 6000;     // wait in lobby before starting
+    const CHECK_MS = 700;
 
-    let turnCount = Number(localStorage.getItem('main_turns')) || 0;
-    let games = Number(localStorage.getItem('main_games')) || 0;
-    let lobbyTime = null;
-    let waiting = false;
-    let idleCount = 0;
-    let swatchAttempt = 0;
-    let wasDisconnected = false;
+    function log(msg, type = 'info') {
+        const prefix = `[RichUp Main] ${new Date().toLocaleTimeString()} `;
+        const style = type === 'error' ? 'color: #ff6b6b' : (type === 'debug' ? 'color: #888' : 'color: #86efac');
+        console.log(`%c${prefix}${msg}`, style);
+    }
 
-    const log = msg => console.log('[MAIN] ' + msg);
-    const sleep = ms => new Promise(r => setTimeout(r, ms + Math.random() * 200));
+    const _workerBlob = new Blob([`
+        self.onmessage = function(e) {
+            if (e.data.cmd === 'sleep') {
+                const id = e.data.id;
+                setTimeout(function() { self.postMessage({ id: id }); }, e.data.ms);
+            }
+        };
+    `], { type: 'application/javascript' });
+    const _timerWorker = new Worker(URL.createObjectURL(_workerBlob));
+    let _sleepId = 0;
+    const _sleepCallbacks = {};
 
-    // --- click dispatch (full pointer/mouse chain + react fiber walk) ---
+    _timerWorker.onmessage = function (e) {
+        const cb = _sleepCallbacks[e.data.id];
+        if (cb) { delete _sleepCallbacks[e.data.id]; cb(); }
+    };
+
+    function sleep(ms) {
+        const actualMs = ms + Math.random() * 200;
+        return new Promise(function (resolve) {
+            const id = ++_sleepId;
+            _sleepCallbacks[id] = resolve;
+            _timerWorker.postMessage({ cmd: 'sleep', id: id, ms: actualMs });
+        });
+    }
+
+    function norm(s) { return s.trim().replace(/\s+/g, ' ').toLowerCase(); }
 
     function doClick(el) {
         if (!el) return;
         const rect = el.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
+
+        // log(`Clicking: "${el.textContent.trim().substring(0, 20)}..."`, 'debug');
+
         const x = rect.left + rect.width / 2;
         const y = rect.top + rect.height / 2;
+
         const o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1 };
         const oUp = { ...o, buttons: 0 };
 
@@ -37,9 +64,8 @@
         el.dispatchEvent(new MouseEvent('mouseup', oUp));
         el.dispatchEvent(new MouseEvent('click', oUp));
 
-        // walk dom + react fiber for handler invocation
         let node = el;
-        for (let d = 0; d < 8 && node; d++) {
+        for (let d = 0; d < 4 && node; d++) {
             if (_tryReact(node, oUp)) return;
             node = node.parentElement;
         }
@@ -55,21 +81,23 @@
             isDefaultPrevented() { return false },
             isPropagationStopped() { return false }
         };
-        for (const k of Object.keys(el)) {
+
+        const safeEl = el;
+        const keys = Object.keys(safeEl);
+
+        for (const k of keys) {
             if (k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$')) {
-                const p = el[k]; if (!p) continue;
-                let found = false;
-                if (typeof p.onClick === 'function') { try { p.onClick(fe); found = true; } catch (e) { } }
-                if (typeof p.onMouseDown === 'function') { try { p.onMouseDown({ ...fe, type: 'mousedown' }); found = true; } catch (e) { } }
-                if (found) return true;
+                const p = safeEl[k]; if (!p) continue;
+                if (typeof p.onClick === 'function') { try { p.onClick(fe); return true; } catch (e) { } }
+                if (typeof p.onMouseDown === 'function') { try { p.onMouseDown({ ...fe, type: 'mousedown' }); return true; } catch (e) { } }
             }
-            if (k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$')) {
-                let f = el[k], d = 0;
-                while (f && d < 15) {
+            if (k.startsWith('__reactFiber$')) {
+                let f = safeEl[k], d = 0;
+                while (f && d < 10) {
                     const mp = f.memoizedProps;
                     if (mp) {
-                        if (typeof mp.onClick === 'function') { try { mp.onClick(fe); } catch (e) { } return true; }
-                        if (typeof mp.onMouseDown === 'function') { try { mp.onMouseDown({ ...fe, type: 'mousedown' }); } catch (e) { } return true; }
+                        if (typeof mp.onClick === 'function') { try { mp.onClick(fe); return true; } catch (e) { } }
+                        if (typeof mp.onMouseDown === 'function') { try { mp.onMouseDown({ ...fe, type: 'mousedown' }); return true; } catch (e) { } }
                     }
                     f = f.return; d++;
                 }
@@ -78,44 +106,47 @@
         return false;
     }
 
-    // --- button helpers ---
-
     const BLACKLIST = [
         'share', 'copy', 'invite', 'sound', 'spectate', 'return to lobby',
         'go to lobby', 'get more', 'change appearance', 'login', 'sign up',
-        'see all', 'private room', 'log in', 'settings', 'appearance'
+        'see all', 'private room', 'log in', 'settings', 'appearance',
+        'how to play', 'close', 'chat', 'maximum', 'friends', 'create',
+        'richup', 'toggle', 'mute', 'unmute', 'leaderboard', 'profile',
+        'report', 'kick', 'emoji', 'help', 'support', 'discord', 'tutorial',
+        'rules', 'video'
     ];
-
-    function norm(s) { return s.trim().replace(/\s+/g, ' ').toLowerCase(); }
 
     function getBtn(match) {
         for (const btn of document.querySelectorAll('button')) {
             if (btn.disabled) continue;
             const tl = norm(btn.textContent);
+            if (tl.length === 0 || tl.length > 50) continue;
             const rect = btn.getBoundingClientRect();
             if (rect.width <= 0 || rect.height <= 0) continue;
             if (BLACKLIST.some(b => tl.includes(b))) continue;
-            if (typeof match === 'string' && tl === match.toLowerCase()) return btn;
-            if (typeof match === 'function' && match(tl)) return btn;
+
+            const isMatch = (typeof match === 'string' && tl === match.toLowerCase()) ||
+                (typeof match === 'function' && match(tl));
+
+            if (isMatch) {
+                return btn;
+            }
         }
         return null;
     }
 
-    function clickBtn(match, label) {
-        const btn = getBtn(match);
-        if (btn) { doClick(btn); log(label); idleCount = 0; return true; }
-        return false;
+    function isInLobby() {
+        const text = document.body.innerText.toLowerCase();
+        return text.includes('game settings') ||
+            text.includes('waiting for players') ||
+            text.includes('maximum players') ||
+            text.includes('select your');
     }
 
-    // --- disconnect detection + recovery ---
-
-    // disconnect detection — disabled until we can identify exact overlay element
-    function isDisconnected() {
-        return false;
+    function isModalOpen() {
+        const text = document.body.innerText;
+        return text.includes('How to play') && text.includes('All players start with');
     }
-
-    // --- swatch detection (appearance selection screen) ---
-    // swatches are small <button> elements containing SVG icons
 
     function findSwatches() {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -123,7 +154,7 @@
         while (textNode = walker.nextNode()) {
             if (textNode.textContent.toLowerCase().includes('select your')) {
                 let container = textNode.parentElement;
-                for (let lvl = 0; lvl < 6 && container; lvl++) {
+                for (let lvl = 0; lvl < 3 && container; lvl++) {
                     const sw = filterSwatchButtons(container.querySelectorAll('button:not([disabled])'));
                     if (sw.length >= 4) return sw;
                     container = container.parentElement;
@@ -131,138 +162,124 @@
                 break;
             }
         }
-        // fallback: scan all buttons with inline color + svg
-        return filterSwatchButtons(document.querySelectorAll('button:not([disabled])'), true);
+        return filterSwatchButtons(document.querySelectorAll('.swatch, [class*="swatch"]'), true);
     }
 
     function filterSwatchButtons(buttons, requireColor) {
         return [...buttons].filter(btn => {
+            if (btn.getAttribute('role') === 'switch') return false;
+            if (btn.hasAttribute('aria-checked')) return false;
+            if (btn.closest('[class*="setting"]')) return false;
+
+            const textContent = norm(btn.textContent + ' ' + (btn.getAttribute('aria-label') || ''));
+            const htmlContent = btn.innerHTML.toLowerCase();
+            if (BLACKLIST.some(b => textContent.includes(b) || htmlContent.includes(b))) return false;
+
+            if (htmlContent.includes('question') || htmlContent.includes('info') ||
+                htmlContent.includes('sound') || htmlContent.includes('volume') ||
+                htmlContent.includes('speaker') || htmlContent.includes('mute')) return false;
+
             const r = btn.getBoundingClientRect();
             if (r.width < 15 || r.width > 90 || r.height < 15 || r.height > 90) return false;
-            if (!btn.querySelector('svg')) return false;
-            if (btn.textContent.trim().length > 5) return false;
+            if (btn.textContent.trim().length > 3) return false;
+
             if (requireColor) {
-                const c = btn.style.color;
-                if (!c || !c.startsWith('rgb')) return false;
+                const s = window.getComputedStyle(btn);
+                const bg = s.backgroundColor;
+                if (bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') return false;
+                const inlineColor = btn.style.color || btn.style.backgroundColor;
+                if (!inlineColor) return false;
             }
             return true;
         });
     }
 
-    // checks for visible join button
     function onColorScreen() {
-        const joinBtn = getBtn('join game') || getBtn(t => t.includes('join game'));
-        return !!joinBtn;
+        const body = document.body.innerText.toLowerCase();
+        return body.includes('select your') && body.includes('appearance');
     }
 
-    // --- main loop ---
+    // STATE
+    let turnCount = Number(localStorage.getItem('main_turns')) || 0;
+    let games = Number(localStorage.getItem('main_games')) || 0;
+    let lobbyTime = null, waiting = false, swatchAttempt = 0;
 
-    async function bot() {
-        sessionStorage.setItem('room_url', location.href);
-        log('Running | games: ' + games + ' | turns: ' + turnCount);
-        while (true) {
-            try {
-                // disconnect detection — pause until resolved
-                if (isDisconnected()) {
-                    if (!wasDisconnected) {
-                        document.title = '[!] DISCONNECTED';
-                        log('Connection lost — paused. Verify in a new tab.');
-                        wasDisconnected = true;
-                    }
-                    await sleep(3000);
-                    if (!isDisconnected()) {
-                        document.title = 'Richup.io';
-                        log('Reconnected — resuming');
-                        wasDisconnected = false;
-                    }
-                    continue;
-                }
-                if (wasDisconnected) {
-                    document.title = 'Richup.io';
-                    log('Reconnected — resuming');
-                    wasDisconnected = false;
-                }
+    const clickBtn = (match, label) => {
+        const btn = getBtn(match);
+        if (btn) { doClick(btn); log(label); return true; }
+        return false;
+    };
 
-                if (clickBtn('another game', 'Another game')) {
-                    games++; localStorage.setItem('main_games', String(games));
-                    turnCount = 0; localStorage.setItem('main_turns', '0');
-                    waiting = false; lobbyTime = null; swatchAttempt = 0;
-                    log('Game ' + games + ' done');
-                    await sleep(800); continue;
-                }
+    log('Started Main Bot (Console Version)');
 
-                // color selection + join
-                if (onColorScreen()) {
-                    const swatches = findSwatches();
-                    if (swatches.length >= 4) {
-                        const idx = swatchAttempt % swatches.length;
-                        log('Swatch ' + idx + '/' + swatches.length + ' (attempt ' + swatchAttempt + ')');
-                        doClick(swatches[idx]);
-                        await sleep(800);
+    async function tick() {
+        try {
+            if (isModalOpen()) {
+                log('Modal detected (How to play?), waiting...');
+                await sleep(2000);
+                setTimeout(tick, 100); return;
+            }
 
-                        const joinBtn = getBtn('join game') || getBtn(t => t.includes('join game'));
-                        if (joinBtn) {
-                            doClick(joinBtn);
-                            await sleep(2000);
+            if (clickBtn('another game', 'Another game')) {
+                games++; localStorage.setItem('main_games', String(games));
+                turnCount = 0; localStorage.setItem('main_turns', '0');
+                waiting = false; lobbyTime = null; swatchAttempt = 0;
+                log('Game ' + games + ' done');
+                setTimeout(tick, 2000); return;
+            }
 
-                            if (!onColorScreen()) {
-                                log('Joined');
-                                swatchAttempt = 0;
-                            } else {
-                                log('Color taken, trying next');
-                                swatchAttempt++;
-                                await sleep(3000);
-                            }
-                        }
-                    }
-                    await sleep(CHECK_MS); continue;
+            const startBtn = getBtn(t => t.includes('start game') || t === 'start');
+            if (startBtn) {
+                if (!waiting) { waiting = true; lobbyTime = Date.now(); log('Waiting for players...'); }
+                if (Date.now() - lobbyTime >= 4000) {
+                    doClick(startBtn); log('Starting game');
+                    waiting = false; lobbyTime = null;
+                    turnCount = 0;
+                    setTimeout(tick, 2000); return;
                 }
+                setTimeout(tick, CHECK_MS); return;
+            } else {
+                waiting = false;
+            }
 
-                // start game after lobby wait
-                const startBtn = getBtn(t => t === 'start game' || t === 'start');
-                if (startBtn) {
-                    if (!waiting) {
-                        waiting = true; lobbyTime = Date.now();
-                        log('Lobby, waiting ' + (LOBBY_WAIT / 1000) + 's');
-                    }
-                    if (Date.now() - lobbyTime >= LOBBY_WAIT) {
-                        doClick(startBtn); log('Started game');
-                        waiting = false; lobbyTime = null; turnCount = 0;
-                        await sleep(1500);
-                    }
-                    await sleep(CHECK_MS); continue;
-                } else { waiting = false; }
-
-                // gameplay actions
-                let acted = false;
-                if (!acted && clickBtn(t => t === 'roll the dice' || t === 'roll again', 'Roll')) {
-                    turnCount++; localStorage.setItem('main_turns', String(turnCount));
-                    log('Turn ' + turnCount); acted = true; await sleep(800);
-                }
-                if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) {
-                    acted = true; await sleep(500);
-                }
-                if (!acted && clickBtn('end turn', 'End turn')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) {
-                    acted = true; await sleep(500);
-                }
-                if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) {
-                    acted = true; await sleep(500);
-                }
-
-                if (!acted) {
-                    idleCount++;
-                    if (idleCount % 250 === 0) {
-                        log('Idle ' + Math.round(idleCount * CHECK_MS / 1000) + 's');
-                        const btns = [...document.querySelectorAll('button')].filter(
-                            b => b.getBoundingClientRect().width > 0 && !b.disabled);
-                        log('Visible buttons: ' + btns.map(b => norm(b.textContent).slice(0, 25)).join(', '));
+            if (onColorScreen()) {
+                const swatches = findSwatches();
+                if (swatches.length >= 4) {
+                    const idx = swatchAttempt % swatches.length;
+                    doClick(swatches[idx]);
+                    await sleep(800);
+                    if (clickBtn(t => t.includes('join game'), 'Join Game')) {
+                        setTimeout(tick, 2000);
+                        swatchAttempt++;
+                        return;
                     }
                 }
-                await sleep(CHECK_MS);
-            } catch (e) { console.error('[MAIN]', e); await sleep(CHECK_MS); }
+                setTimeout(tick, CHECK_MS); return;
+            }
+
+            if (isInLobby()) {
+                setTimeout(tick, CHECK_MS); return;
+            }
+
+            let acted = false;
+            if (!acted && clickBtn(t => t === 'roll the dice' || t === 'roll again', 'Roll')) {
+                turnCount++; localStorage.setItem('main_turns', String(turnCount));
+                log('Turn ' + turnCount); acted = true;
+            }
+            if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { acted = true; await sleep(500); }
+            if (!acted && clickBtn('end turn', 'End turn')) { acted = true; await sleep(500); }
+            if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { acted = true; await sleep(500); }
+            if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { acted = true; await sleep(500); }
+
+            if (acted) setTimeout(tick, 800);
+            else setTimeout(tick, CHECK_MS);
+
+        } catch (e) {
+            log(`Error: ${e.message}`, 'error');
+            setTimeout(tick, CHECK_MS);
         }
     }
 
-    bot();
+    tick();
+
 })();
