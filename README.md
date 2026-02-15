@@ -1,92 +1,74 @@
-# RichUp Bot
+# RichUp.io Bot
 
-Automated coin farming for [RichUp.io](https://richup.io). Runs as a Tampermonkey userscript with a GUI, or standalone from browser console.
+A fully automated bot for farming games on [RichUp.io](https://richup.io/). This bot handles everything from game creation, rolling the dice, buying properties, managing jail, and automatically bankrupting alts to boost the main account.
 
-## How It Works
+---
 
-You run one main account that plays to win, and at least 3 alt accounts that feed it. Alts play normally for 70 turns, then auto-bankrupt — transferring their assets to whoever's left. Main never bankrupts, just keeps collecting. After each game, all tabs auto-rejoin and the cycle repeats.
+## 🚀 Features (v2.8.0)
 
-## Setup (Tampermonkey — Recommended)
+-   **Automatic Farming:** Plays game loops automatically (Join -> Play -> Bankrupt -> Repeat).
+-   **Anti-Cheat Bypass:** Uses random jitter and human-like delays to avoid detection.
+-   **Keep-Alive System:** Includes a specialized mode to bypass Cloudflare timeouts and keep the session active, even when minimized (Anti-Throttle Worker).
+-   **Multi-Instance Support:** Run as many instances as your PC can handle.
+-   **GUI Panel:** Floating control panel to switch between Main and Alt modes on the fly.
+-   **Smart Interaction:** Handles modals, popups, and random events automatically.
+-   **Sandbox Compatible:** Works with Tampermonkey/Greasemonkey strict security modes.
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) in your browser
-2. Create a new script and paste the contents of `richup-bot.user.js`
-3. Open RichUp.io in your main browser window
-4. Open **separate incognito windows** for each alt (minimum 3 recommended)
-   - Each alt MUST be in its own incognito window or browser profile
-   - Enable Tampermonkey in incognito mode (Extensions → Tampermonkey → Allow in Incognito)
-5. Main creates a private room, alts join via room link
-6. Set **starting money to max** in game settings
-7. Click **▶ Main** in the floating panel on your main window
-8. Click **▶ Alt** in the floating panel on each alt window
-9. Bot handles everything — color selection, joining, gameplay, bankruptcy, and rejoining
-10. Survives page reloads automatically — no need to re-paste scripts
+---
 
-## Setup (Console — Alternative)
+## 🛠 Installation
 
-1. Open RichUp.io, create room, alts join
-2. Set starting money to max
-3. Open console (F12 → Console) and paste:
-   - Main window → `main.js`
-   - Each alt window → `alts.js`
-4. Scripts don't survive page reloads — you'll need to re-paste after disconnect
+### 1. Install Userscript Manager
+You need a userscript manager to run this bot. We recommend:
+-   **Tampermonkey** (Chrome, Edge, Firefox, Opera)
 
-## Config
+### 2. Install the Script
+1.  Click on the extension icon and select **Create a new script**.
+2.  Copy the contents of `richup-bot.user.js`.
+3.  Paste it into the editor and hit **File > Save** (Ctrl+S).
 
-Top of the userscript (or individual files):
+---
 
-```javascript
-const CHECK_MS = 700;          // poll interval (ms)
-const LOBBY_WAIT = 6000;       // lobby wait before auto-starting (ms)
-const BANKRUPT_AFTER = 70;     // turns before alt auto-bankruptcy
-```
+## 🎮 How to Use
 
-## Disconnect Recovery
+### 1. Main Account
+1.  Open [RichUp.io](https://richup.io/).
+2.  You will see the **RichUp Bot** panel in the top-right.
+3.  Click **▶ Main**.
+4.  Create a "Private Game".
+5.  Set the room to **4 Players**.
+6.  Copy the Invite Link.
 
-RichUp sometimes drops your connection (Cloudflare verification, internet hiccup, etc.). When this happens:
+### 2. Alt Accounts
+1.  Open a new **Incognito Window** (or a different browser profile).
+2.  Paste the Invite Link.
+3.  When the panel appears, click **▶ Alt**.
+4.  The bot will automatically pick a color, join, and play.
+5.  **Repeat** for as many alts as you need (up to 3 per room).
 
-1. Bot detects the "Lost connection" overlay and **auto-pauses** — no erratic clicking
-2. Tab title changes to `[!] DISCONNECTED` so you can spot it
-3. Open a new tab → go to richup.io → verify if prompted → close it
-4. Go back to the disconnected tab — the overlay clears and the bot **auto-resumes**
-5. With Tampermonkey, even a full page reload restarts the bot automatically
+### 📝 Important Notes
+*   **Keep-Alive Tab:**
+    *   Open a new tab and click the **↻ Keep-Alive Tab** button in the bot panel.
+    *   This opens a special page that refreshes automatically to keep your Cloudflare session valid.
+    *   **Do NOT minimize** this specific tab completely (you can put it in a separate window behind others, but don't minimize to taskbar if your browser throttles heavily).
+    *   The bot uses a Web Worker to fight throttling, but keeping it visible (even slightly) is safer.
+    *   You need one Keep-Alive tab for your Main session and one for your Alts (Incognito).
 
-## Console Output
+*   **Bankruptcy:**
+    *   Alts are configured to automatically **Bankrupt** after **70 turns**.
+    *   This speeds up the farming process significantly.
+    *   Logic: At turn 70, the bot will click "Declare Bankruptcy", confirm it, restart, and rejoin the next game.
 
-```
-[MAIN] Running | games: 5 | turns: 12
-[MAIN] Joined
-[MAIN] Roll
-[alt_a3f2] Turn 45/70
-[alt_a3f2] Bankrupted
-[alt_x9k1] Joined
-[MAIN] Connection lost — paused
-[MAIN] Reconnected
-```
+*   **Console Version:**
+    *   If you prefer not to use an extension, you can paste the code from `main.js` or `alts.js` directly into the Browser Console (F12).
 
-## Technical Details
+---
 
-- Full pointer/mouse event chain for React compatibility
-- React fiber tree walk to invoke internal handlers up to 15 levels deep
-- Button blacklist prevents accidental clicks on share/copy/invite/sound/settings
-- Swatch detection via DOM tree walk with SVG-based button filtering
-- Per-alt isolation using sessionStorage with random IDs
-- Identity persistence — alt names/settings captured and restored between games
-- Disconnect detection with auto-pause/resume
-- Randomized timing jitter on all actions
+## 🧩 Troubleshooting
 
-## Reset
+*   **Bot not clicking?** Ensure the page is focused or at least visible on one monitor.
+*   **Cloudflare Loop?** Use the "Keep-Alive" tab feature. If it persists, get a [2Captcha API Key](https://2captcha.com/) and enter it via the **🔑 Set API Key** button in the panel to automate solving.
 
-```javascript
-localStorage.clear()
-sessionStorage.clear()
-location.reload()
-```
+---
 
-## Tips
-
-- Use at least **3 alts** for consistent wins — with fewer, the main might not always be last standing
-- Set starting money to **max** — more money = more assets to collect when alts bankrupt
-- If an alt gets stuck on the color screen, just refresh (Tampermonkey restarts automatically)
-- Room persists via "Another game" — you don't need to manually create new rooms
-
-**Use at your own risk.**
+**Happy Farming! 🎲**
