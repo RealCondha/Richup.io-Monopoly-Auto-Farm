@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         RichUp Bot (Debug Branch)
+// @name         RichUp Bot
 // @namespace    richup-bot
-// @version      2.7.2-stable
+// @version      2.8.0-stable
 // @description  Auto-farm RichUp.io — pick Main or Alt mode per tab. Includes DEBUG logging and state visualization.
 // @match        https://richup.io/*
 // @connect      api.capmonster.cloud
