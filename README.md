@@ -4,17 +4,16 @@ A fully automated bot for farming games on [RichUp.io](https://richup.io/). This
 
 ---
 
-## 🚀 Features (v2.8.0)
-
+## 🚀 Features (v2.8.1)
 -   **Automatic Farming:** Plays game loops automatically (Join -> Play -> Bankrupt -> Repeat).
 -   **Anti-Cheat Bypass:** Uses random jitter and human-like delays to avoid detection.
 -   **Keep-Alive System:** Includes a specialized mode to bypass Cloudflare timeouts and keep the session active, even when minimized (Anti-Throttle Worker).
 -   **Multi-Instance Support:** Run as many instances as your PC can handle.
--   **GUI Panel:** Floating control panel to switch between Main and Alt modes on the fly.
--   **Smart Interaction:** Handles modals, popups, and random events automatically.
--   **Sandbox Compatible:** Works with Tampermonkey/Greasemonkey strict security modes.
-
----
+-   **Native Native GUI Panel:** Floating, resizable control panel utilizing the game's actual design system to seamlessly switch between Main, Alt, and API functions.
+-   **Smart Interaction:** Handles modals, popups, color selection, and random events automatically.
+-   **AFK Votekick Failsafe:** Automatically handles frozen or inactive players by triggering a votekick if the game stalls for 35 seconds.
+-   **Memory & CPU Optimized:** Employs console-log memory management and zero-reflow DOM navigation (eliminating layout thrashing) for completely lag-free infinite running.
+-   **Sandbox Compatible:** Works flawlessly with Tampermonkey/Greasemonkey strict security modes via `unsafeWindow` and React unwrapping.
 
 ## 🛠 Installation
 
