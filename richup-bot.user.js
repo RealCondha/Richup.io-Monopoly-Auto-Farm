@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RichUp Bot
 // @namespace    richup-bot
-// @version      2.8.0-stable
+// @version      2.8.1
 // @description  Auto-farm RichUp.io — pick Main or Alt mode per tab. Includes DEBUG logging and state visualization.
 // @match        https://richup.io/*
 // @connect      api.capmonster.cloud
@@ -112,7 +112,9 @@
     // LOGGING & DEBUG
     // ═══════════════════════════════════════════════════════
 
+    let logCount = 0;
     function log(msg, type = 'info') {
+        if (++logCount % 80 === 0) console.clear(); // Prevent memory bloat from infinite logs
         const prefix = `[RichUp Bot] ${new Date().toLocaleTimeString()} `;
         const style = type === 'error' ? 'color: #ff6b6b' : (type === 'debug' ? 'color: #888' : 'color: #a78bfa');
         console.log(`%c${prefix}${msg}`, style);
@@ -252,15 +254,21 @@
             if (btn.closest('#richup-bot-panel')) continue;
             const tl = norm(btn.textContent);
             if (tl.length === 0 || tl.length > 50) continue;
-            const rect = btn.getBoundingClientRect();
-            if (rect.width <= 0 || rect.height <= 0) continue;
-            if (BLACKLIST.some(b => tl.includes(b))) continue;
+
+            // If the btn text includes 'votekick', we MUST NOT skip it, because we need it for failsafe
+            if (tl.includes('votekick') || tl.includes('kick')) {
+                // Pass. Fall down to match check.
+            } else if (BLACKLIST.some(b => tl.includes(b))) continue;
 
             const isMatch = (typeof match === 'string' && tl === match.toLowerCase()) ||
                 (typeof match === 'function' && match(tl));
 
-            if (isMatch) {
-                return btn;
+            // EXCEPTION: If we are specifically looking for 'votekick', skip blacklist check
+            if (isMatch || (typeof match === 'string' && match.toLowerCase() === 'votekick')) {
+                // If the user function matcher explicitly wants "votekick", we ensure it passes
+                // OPTIMIZATION: Only evaluate size if text matches to prevent Layout Thrashing lag
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) return btn;
             }
         }
         return null;
@@ -314,7 +322,7 @@
                 htmlContent.includes('speaker') || htmlContent.includes('mute')) return false;
 
             const r = btn.getBoundingClientRect();
-            if (r.width < 15 || r.width > 90 || r.height < 15 || r.height > 90) return false;
+            if (r.width < 5 || r.width > 120 || r.height < 5 || r.height > 120) return false;
             if (btn.textContent.trim().length > 3) return false;
 
             if (requireColor) {
@@ -399,80 +407,114 @@
     function createGUI() {
         const panel = document.createElement('div');
         panel.id = 'richup-bot-panel';
+        panel.className = 'mode-idle';
         panel.innerHTML = `
     <style>
         #richup-bot-panel {
-            position: fixed; top: 18px; right: 18px; z-index: 999999;
-            font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px;
-            color: #e0e0e0; background: rgba(22, 19, 32, 0.85);
-            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(139, 92, 246, 0.25);
-            border-radius: 16px; padding: 14px 16px; min-width: 190px;
-            box-shadow: 0 4px 30px rgba(0,0,0,0.5), 0 0 15px rgba(139, 92, 246, 0.1);
-            user-select: none; cursor: move; transition: opacity 0.3s;
-            box-sizing: border-box;
+            position: fixed; top: 24px; right: 24px; z-index: 999999;
+            font-family: 'Nunito', 'Poppins', system-ui, -apple-system, sans-serif; font-size: 13px;
+            color: #e2e4ec; background: #171822;
+            border: 1px solid #2a2c3a;
+            border-radius: 14px; padding: 18px; min-width: 230px; min-height: 100px;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+            user-select: none; transition: opacity 0.3s;
+            box-sizing: border-box; resize: both; overflow: hidden;
+            display: flex; flex-direction: column;
         }
         #richup-bot-panel * { box-sizing: border-box; }
         #richup-bot-panel .title {
-            font-weight: 800; font-size: 15px; margin-bottom: 10px;
-            background: linear-gradient(90deg, #e9d5ff, #c084fc); -webkit-background-clip: text; color: transparent;
-            text-shadow: 0 2px 10px rgba(192, 132, 252, 0.2); letter-spacing: 0.5px;
+            font-weight: 800; font-size: 16px; margin-bottom: 14px;
+            color: #FFFFFF; letter-spacing: 0.5px;
+            display: flex; align-items: center; gap: 8px;
+            padding-right: 32px; cursor: move; /* Drag handle */
         }
-        #richup-bot-panel .btn-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        #richup-bot-panel .title::before {
+            content: ''; display: inline-block; width: 10px; height: 10px;
+            border-radius: 50%; transition: all 0.3s ease;
+        }
+        /* Dynamic Dot Status */
+        #richup-bot-panel.mode-idle .title::before { background: #576076; box-shadow: none; }
+        #richup-bot-panel.mode-main .title::before { background: #B1E827; box-shadow: 0 0 10px rgba(177, 232, 39, 0.6); }
+        #richup-bot-panel.mode-alt .title::before { background: #9D72FF; box-shadow: 0 0 10px rgba(157, 114, 255, 0.6); }
+
+        #richup-bot-panel .body { flex-grow: 1; display: flex; flex-direction: column; }
+        #richup-bot-panel .btn-row { display: flex; gap: 10px; margin-bottom: 12px; }
         #richup-bot-panel button {
-            flex: 1; padding: 7px 0; border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+            flex: 1; padding: 10px 0; border: 1px solid #2a2c3a;
+            border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            background: rgba(255,255,255,0.04); color: #ccc;
+            background: #1e202d; color: #8F94A8;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
         }
-        #richup-bot-panel button:hover {
-            background: rgba(255,255,255,0.1); color: #fff; border-color: rgba(255,255,255,0.2);
-            transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        #richup-bot-panel button:hover:not(:disabled) {
+            background: #272a3b; color: #FFFFFF; border-color: #3a3e52;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
         }
-        #richup-bot-panel button:active { transform: translateY(0); }
+        #richup-bot-panel button:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
         
         #richup-bot-panel button.active-main {
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(20, 83, 45, 0.3));
-            border-color: rgba(74, 222, 128, 0.4); color: #86efac;
-            box-shadow: 0 0 12px rgba(74, 222, 128, 0.2);
+            background: #B1E827; border-color: #B1E827; color: #171822;
+            box-shadow: 0 0 16px rgba(177, 232, 39, 0.2);
         }
         #richup-bot-panel button.active-alt {
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(76, 29, 149, 0.3));
-            border-color: rgba(167, 139, 250, 0.4); color: #c4b5fd;
-            box-shadow: 0 0 12px rgba(167, 139, 250, 0.2);
+            background: #9D72FF; border-color: #9D72FF; color: #FFFFFF;
+            box-shadow: 0 0 16px rgba(157, 114, 255, 0.2);
         }
         #richup-bot-panel button.stop {
-            background: rgba(239, 68, 68, 0.2); border-color: rgba(248, 113, 113, 0.4); color: #fca5a5;
-            font-size: 11px; padding: 5px 0;
+            background: #FF4757; border-color: #FF4757; color: #FFFFFF;
+            font-size: 12px; padding: 8px 0;
+            box-shadow: 0 0 12px rgba(255, 71, 87, 0.2);
+        }
+        #richup-bot-panel button.stop:hover:not(:disabled) {
+            background: #FF6B81; border-color: #FF6B81;
         }
 
-        #richup-bot-panel .status-row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 11px; }
-        #richup-bot-panel .status { color: #94a3b8; font-weight: 500; }
-        #richup-bot-panel .turns { color: #cbd5e1; font-family: 'Consolas', monospace; font-size: 11px; }
+        #richup-bot-panel .secondary-btn { font-size: 11px; padding: 8px; background: #1a1c25; color: #6b7280; border-color: #232530; font-weight: 600; }
+        #richup-bot-panel .secondary-btn:hover:not(:disabled) { background: #222533; color: #F2F4F8; border-color: #2d303f; }
 
-        #richup-bot-panel .bottom-row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
+        #richup-bot-panel .status-row { 
+            display: flex; justify-content: space-between; align-items: center; 
+            margin-top: auto; font-size: 12px; 
+            background: #1e202d; padding: 10px 12px; border-radius: 8px;
+            border: 1px solid #232530;
+        }
+        #richup-bot-panel .status { color: #FFFFFF; font-weight: 600; }
+        #richup-bot-panel .turns { color: #8F94A8; font-weight: 700; }
+
+        #richup-bot-panel .bottom-row { 
+            display: flex; justify-content: space-between; align-items: center; 
+            margin-top: 14px; padding-top: 14px; border-top: 1px solid #2A2C3C; 
+        }
         #richup-bot-panel .state {
-            font-size: 9px; padding: 3px 6px; border-radius: 6px; background: #0f172a;
-            color: #64748b; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
+            font-size: 10px; padding: 4px 8px; border-radius: 4px; background: #212330;
+            color: #8F94A8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
         }
         /* Dynamic State Colors */
-        #richup-bot-panel .state.lobby { background: rgba(234, 179, 8, 0.15); color: #fde047; box-shadow: 0 0 8px rgba(234, 179, 8, 0.1); }
-        #richup-bot-panel .state.game { background: rgba(34, 197, 94, 0.15); color: #86efac; box-shadow: 0 0 8px rgba(34, 197, 94, 0.1); }
-        #richup-bot-panel .state.modal { background: rgba(239, 68, 68, 0.15); color: #fca5a5; box-shadow: 0 0 8px rgba(239, 68, 68, 0.1); }
+        #richup-bot-panel .state.lobby { background: rgba(255, 165, 2, 0.15); color: #FFA502; border: 1px solid rgba(255, 165, 2, 0.3); }
+        #richup-bot-panel .state.game { background: rgba(177, 232, 39, 0.15); color: #B1E827; border: 1px solid rgba(177, 232, 39, 0.3); }
+        #richup-bot-panel .state.modal { background: rgba(255, 71, 87, 0.15); color: #FF4757; border: 1px solid rgba(255, 71, 87, 0.3); }
         
-        #richup-bot-panel .footer { font-size: 9px; color: #64748b; font-style: italic; font-family: 'Consolas', monospace; opacity: 0.8; }
+        #richup-bot-panel .footer { font-size: 10px; color: #576076; font-weight: 600; }
 
         #richup-bot-panel .minimize-btn {
-            position: absolute; top: 12px; right: 14px; background: none; border: none;
-            color: #64748b; font-size: 18px; cursor: pointer; padding: 0; line-height: 1; transition: color 0.2s;
+            position: absolute; top: 12px; right: 12px; background: none; border: none;
+            color: #576076; font-size: 20px; font-weight: 700; cursor: pointer; padding: 0; line-height: 1;
+            width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+            border-radius: 6px; transition: background 0.2s, color 0.2s; box-shadow: none;
         }
-        #richup-bot-panel .minimize-btn:hover { color: #fff; }
+        #richup-bot-panel .minimize-btn:hover { color: #FFFFFF; background: #272a3b; border: none; transform: none; }
+        
+        #richup-bot-panel.minimized .title { margin-bottom: 0; }
         #richup-bot-panel.minimized .body { display: none; }
-        #richup-bot-panel.minimized { min-width: auto; padding: 10px 14px; border-radius: 12px; }
+        #richup-bot-panel.minimized { 
+            min-width: 150px; padding: 12px 18px; border-radius: 12px; 
+            min-height: auto; height: auto !important; width: auto !important; resize: none; 
+        }
     </style>
     
     <div class="title">RichUp Bot</div>
-    <span class="minimize-btn" id="rb-minimize">−</span>
+    <button class="minimize-btn" id="rb-minimize" title="Minimize/Expand">−</button>
     
     <div class="body">
         <div class="btn-row">
@@ -483,9 +525,9 @@
             <button class="stop" id="rb-stop">■ Stop Bot</button>
         </div>
         
-        <div class="btn-row" style="margin-top:8px">
-            <button id="rb-keepalive" style="font-size:10px;padding:4px;background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.05);color:#777">↻ Keep-Alive Tab</button>
-            <button id="rb-solver-key" style="font-size:10px;padding:4px;background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.05);color:#777">🔑 Set API Key</button>
+        <div class="btn-row" style="margin-top:4px">
+            <button id="rb-keepalive" class="secondary-btn">↻ Keep-Alive Tab</button>
+            <button id="rb-solver-key" class="secondary-btn">🔑 API Key</button>
         </div>
 
         <div class="status-row">
@@ -501,11 +543,11 @@
 `;
         document.body.appendChild(panel);
 
-        // Draggable Logic (Fixed stretching bug)
+        // Draggable Logic
         let dragging = false, dx, dy;
 
         panel.addEventListener('mousedown', e => {
-            if (e.target.tagName === 'BUTTON' || e.target.id === 'rb-minimize') return;
+            if (!e.target.closest('.title')) return; // Only allow dragging from the title area
 
             const r = panel.getBoundingClientRect();
             // Switch to absolute positioning relative to top-left to allow free movement
@@ -513,7 +555,6 @@
             panel.style.top = r.top + 'px';
             panel.style.right = 'auto'; // Prevent stretching
             panel.style.bottom = 'auto';
-            // Removed width fixing to allow auto-sizing and prevent growth bug
 
             dragging = true;
             dx = e.clientX - r.left;
@@ -529,7 +570,10 @@
         document.addEventListener('mouseup', () => { dragging = false; });
 
         // Controls
-        document.getElementById('rb-minimize').onclick = () => panel.classList.toggle('minimized');
+        document.getElementById('rb-minimize').onclick = (e) => {
+            panel.classList.toggle('minimized');
+            e.target.textContent = panel.classList.contains('minimized') ? '＋' : '−';
+        };
         document.getElementById('rb-main').onclick = () => startBot('main');
         document.getElementById('rb-alt').onclick = () => startBot('alt');
         document.getElementById('rb-stop').onclick = () => stopBot();
@@ -569,9 +613,15 @@
         const mainBtn = document.getElementById('rb-main');
         const altBtn = document.getElementById('rb-alt');
         const stopRow = document.getElementById('rb-stop-row');
+        const panel = document.getElementById('richup-bot-panel');
 
         mainBtn.disabled = true;
         altBtn.disabled = true;
+
+        if (panel) {
+            panel.classList.remove('mode-idle', 'mode-main', 'mode-alt');
+            panel.classList.add('mode-' + mode);
+        }
 
         if (mode === 'main') {
             mainBtn.classList.add('active-main');
@@ -596,9 +646,17 @@
         const mainBtn = document.getElementById('rb-main');
         const altBtn = document.getElementById('rb-alt');
         const stopRow = document.getElementById('rb-stop-row');
+        const panel = document.getElementById('richup-bot-panel');
+
         mainBtn.disabled = false; altBtn.disabled = false;
         mainBtn.classList.remove('active-main');
         altBtn.classList.remove('active-alt');
+
+        if (panel) {
+            panel.classList.remove('mode-idle', 'mode-main', 'mode-alt');
+            panel.classList.add('mode-idle');
+        }
+
         stopRow.style.display = 'none';
         updateStatus('Stopped');
         updateStateDisplay('IDLE');
@@ -668,7 +726,11 @@
                         doClick(swatches[idx]);
                         await sleep(800);
                         if (clickBtn(t => t.includes('join game'), 'Join Game')) {
-                            await sleep(2000);
+                            logMain('Joining game, waiting for lobby...');
+                            for (let w = 0; w < 15; w++) {
+                                await sleep(500);
+                                if (!onColorScreen()) break;
+                            }
                             swatchAttempt++;
                         }
                     }
@@ -683,21 +745,61 @@
                     await sleep(CHECK_MS); continue;
                 }
 
+                // AFK VOTEKICK FAILSAFE
+                const lastAction = Number(localStorage.getItem('rb_last_action')) || Date.now();
+                if (Date.now() - lastAction > 35000) {
+                    logMain('AFK Failsafe triggered: No actions in 35s. Kicking inactive players...');
+
+                    // Click Vote Kick button
+                    const voteKickBtn = getBtn(t => t.includes('votekick'));
+                    if (voteKickBtn) {
+                        doClick(voteKickBtn);
+                        await sleep(1000); // wait for modal
+
+                        // Find all small kick buttons in the modal (buttons with SVG or "kick" aria labels)
+                        const kickButtons = [...document.querySelectorAll('button')].filter(b => {
+                            if (b.closest('#richup-bot-panel')) return false;
+
+                            const html = b.innerHTML.toLowerCase();
+                            // Filter out "Help" and "Sound" buttons which also have SVGs
+                            if (html.includes('question') || html.includes('volume') || html.includes('sound') || html.includes('speaker') || html.includes('discord')) return false;
+
+                            const t = norm(b.textContent + ' ' + (b.getAttribute('aria-label') || ''));
+                            // Looking for small X buttons or explicit kick attributes
+                            return t.includes('kick') || t.includes('remove') || (b.querySelector('svg') !== null);
+                        });
+
+                        // Ignore buttons that are large or have general text to avoid closing the modal
+                        for (const b of kickButtons) {
+                            const rect = b.getBoundingClientRect();
+                            if (rect.width > 0 && rect.width < 50 && rect.height > 0 && rect.height < 50) {
+                                doClick(b);
+                                await sleep(300);
+                            }
+                        }
+                    }
+                    localStorage.setItem('rb_last_action', Date.now()); // Reset timer
+                }
+
                 // 5. Game Loop
                 updateStateDisplay('GAME');
                 let acted = false;
+
+                // Helper to record action
+                const recordAction = () => localStorage.setItem('rb_last_action', Date.now());
 
                 // Roll
                 if (!acted && clickBtn(t => t === 'roll the dice' || t === 'roll again', 'Roll')) {
                     turnCount++; localStorage.setItem('main_turns', String(turnCount));
                     updateTurns(turnCount);
+                    recordAction();
                     logMain('Turn ' + turnCount); acted = true; await sleep(800);
                 }
                 // Transactions
-                if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn('end turn', 'End turn')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { recordAction(); acted = true; await sleep(500); }
+                if (!acted && clickBtn('end turn', 'End turn')) { recordAction(); acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { recordAction(); acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { recordAction(); acted = true; await sleep(500); }
 
                 await sleep(CHECK_MS);
 
@@ -807,10 +909,9 @@
                         await sleep(1000);
                         if (clickBtn(t => t.includes('join game'), 'Join Game')) {
                             logAlt('Joined game, waiting for lobby...');
-                            // Wait for transition to prevent double-click
-                            for (let w = 0; w < 10; w++) {
+                            for (let w = 0; w < 15; w++) {
                                 await sleep(500);
-                                if (isInLobby()) break;
+                                if (!onColorScreen()) break;
                             }
                             swatchAttempt++;
                         }
@@ -823,19 +924,55 @@
                     await sleep(CHECK_MS); continue;
                 }
 
+                // AFK VOTEKICK FAILSAFE (Alt version)
+                const lastAction = Number(localStorage.getItem('rb_last_action')) || Date.now();
+                if (Date.now() - lastAction > 35000) {
+                    logAlt('AFK Failsafe triggered: No actions in 35s. Kicking inactive players...');
+
+                    const voteKickBtn = getBtn(t => t.includes('votekick'));
+                    if (voteKickBtn) {
+                        doClick(voteKickBtn);
+                        await sleep(1000);
+
+                        const kickButtons = [...document.querySelectorAll('button')].filter(b => {
+                            if (b.closest('#richup-bot-panel')) return false;
+
+                            const html = b.innerHTML.toLowerCase();
+                            // Filter out "Help" and "Sound" buttons which also have SVGs
+                            if (html.includes('question') || html.includes('volume') || html.includes('sound') || html.includes('speaker') || html.includes('discord')) return false;
+
+                            const t = norm(b.textContent + ' ' + (b.getAttribute('aria-label') || ''));
+                            return t.includes('kick') || t.includes('remove') || (b.querySelector('svg') !== null);
+                        });
+
+                        for (const b of kickButtons) {
+                            const rect = b.getBoundingClientRect();
+                            if (rect.width > 0 && rect.width < 50 && rect.height > 0 && rect.height < 50) {
+                                doClick(b);
+                                await sleep(300);
+                            }
+                        }
+                    }
+                    localStorage.setItem('rb_last_action', Date.now());
+                }
+
                 updateStateDisplay('GAME');
                 let acted = false;
+
+                const recordAction = () => localStorage.setItem('rb_last_action', Date.now());
+
                 if (!acted && clickBtn(t => t === 'roll the dice' || t === 'roll again', 'Roll')) {
                     turnCount++;
                     sessionStorage.setItem(ALT_ID + '_turns', String(turnCount));
                     updateTurns(turnCount);
+                    recordAction();
                     logAlt('Turn ' + turnCount + '/' + BANKRUPT_AFTER);
                     acted = true; await sleep(800);
                 }
-                if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn('end turn', 'End turn')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { acted = true; await sleep(500); }
-                if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { recordAction(); acted = true; await sleep(500); }
+                if (!acted && clickBtn('end turn', 'End turn')) { recordAction(); acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { recordAction(); acted = true; await sleep(500); }
+                if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { recordAction(); acted = true; await sleep(500); }
 
                 await sleep(CHECK_MS);
 
