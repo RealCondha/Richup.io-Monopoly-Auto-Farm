@@ -8,7 +8,9 @@
     const CHECK_MS = 700;
     const BANKRUPT_AFTER = 70;
 
+    let logCount = 0;
     function log(msg, type = 'info') {
+        if (++logCount % 80 === 0) console.clear(); // Prevent memory bloat
         const prefix = `[RichUp Alt] ${new Date().toLocaleTimeString()} `;
         const style = type === 'error' ? 'color: #ff6b6b' : (type === 'debug' ? 'color: #888' : 'color: #c4b5fd');
         console.log(`%c${prefix}${msg}`, style);
@@ -120,15 +122,21 @@
             if (btn.disabled) continue;
             const tl = norm(btn.textContent);
             if (tl.length === 0 || tl.length > 50) continue;
-            const rect = btn.getBoundingClientRect();
-            if (rect.width <= 0 || rect.height <= 0) continue;
-            if (BLACKLIST.some(b => tl.includes(b))) continue;
+
+            // If the btn text includes 'votekick', we MUST NOT skip it, because we need it for failsafe
+            if (tl.includes('votekick') || tl.includes('kick')) {
+                // Pass. Fall down to match check.
+            } else if (BLACKLIST.some(b => tl.includes(b))) continue;
 
             const isMatch = (typeof match === 'string' && tl === match.toLowerCase()) ||
                 (typeof match === 'function' && match(tl));
 
-            if (isMatch) {
-                return btn;
+            // EXCEPTION: If we are specifically looking for 'votekick', skip blacklist check
+            if (isMatch || (typeof match === 'string' && match.toLowerCase() === 'votekick')) {
+                // If the user function matcher explicitly wants "votekick", we ensure it passes
+                // OPTIMIZATION: Only evaluate size if text matches to prevent Layout Thrashing lag
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) return btn;
             }
         }
         return null;
@@ -179,7 +187,7 @@
                 htmlContent.includes('speaker') || htmlContent.includes('mute')) return false;
 
             const r = btn.getBoundingClientRect();
-            if (r.width < 15 || r.width > 90 || r.height < 15 || r.height > 90) return false;
+            if (r.width < 5 || r.width > 120 || r.height < 5 || r.height > 120) return false;
             if (btn.textContent.trim().length > 3) return false;
 
             if (requireColor) {
@@ -273,9 +281,9 @@
                     await sleep(1000);
                     if (clickBtn(t => t.includes('join game'), 'Join Game')) {
                         log('Joined game, waiting for lobby...');
-                        for (let w = 0; w < 10; w++) {
+                        for (let w = 0; w < 15; w++) {
                             await sleep(500);
-                            if (isInLobby()) break;
+                            if (!onColorScreen()) break;
                         }
                         swatchAttempt++;
                     }
@@ -287,17 +295,46 @@
                 setTimeout(tick, CHECK_MS); return;
             }
 
+            // AFK VOTEKICK FAILSAFE (Alt version)
+            const lastAction = Number(localStorage.getItem('rb_last_action')) || Date.now();
+            if (Date.now() - lastAction > 35000) {
+                log('AFK Failsafe triggered: No actions in 35s. Kicking inactive players...');
+
+                const voteKickBtn = getBtn(t => t.includes('votekick'));
+                if (voteKickBtn) {
+                    doClick(voteKickBtn);
+                    await sleep(1000);
+
+                    const kickButtons = [...document.querySelectorAll('button')].filter(b => {
+                        const t = norm(b.textContent + ' ' + (b.getAttribute('aria-label') || ''));
+                        return t.includes('kick') || t.includes('remove') || b.querySelector('svg');
+                    });
+
+                    for (const b of kickButtons) {
+                        const rect = b.getBoundingClientRect();
+                        if (rect.width > 0 && rect.width < 50 && rect.height > 0 && rect.height < 50) {
+                            doClick(b);
+                            await sleep(300);
+                        }
+                    }
+                }
+                localStorage.setItem('rb_last_action', Date.now());
+            }
+
             let acted = false;
+            const recordAction = () => localStorage.setItem('rb_last_action', Date.now());
+
             if (!acted && clickBtn(t => t === 'roll the dice' || t === 'roll again', 'Roll')) {
                 turnCount++;
                 sessionStorage.setItem(ALT_ID + '_turns', String(turnCount));
+                recordAction();
                 log('Turn ' + turnCount + '/' + BANKRUPT_AFTER);
                 acted = true;
             }
-            if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { acted = true; await sleep(500); }
-            if (!acted && clickBtn('end turn', 'End turn')) { acted = true; await sleep(500); }
-            if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { acted = true; await sleep(500); }
-            if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { acted = true; await sleep(500); }
+            if (!acted && clickBtn(t => t === 'buy' || t.startsWith('buy '), 'Buy')) { recordAction(); acted = true; await sleep(500); }
+            if (!acted && clickBtn('end turn', 'End turn')) { recordAction(); acted = true; await sleep(500); }
+            if (!acted && clickBtn(t => t === 'pay' || t.startsWith('pay '), 'Pay')) { recordAction(); acted = true; await sleep(500); }
+            if (!acted && clickBtn(t => t === 'ok' || t === 'okay' || t === 'got it', 'OK')) { recordAction(); acted = true; await sleep(500); }
 
             if (acted) setTimeout(tick, 800);
             else setTimeout(tick, CHECK_MS);
