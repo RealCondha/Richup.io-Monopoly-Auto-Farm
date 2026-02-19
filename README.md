@@ -5,6 +5,7 @@ A fully automated bot for farming games on [RichUp.io](https://richup.io/). This
 ---
 
 ## 🚀 Features (v2.8.1)
+
 -   **Automatic Farming:** Plays game loops automatically (Join -> Play -> Bankrupt -> Repeat).
 -   **Anti-Cheat Bypass:** Uses random jitter and human-like delays to avoid detection.
 -   **Keep-Alive System:** Includes a specialized mode to bypass Cloudflare timeouts and keep the session active, even when minimized (Anti-Throttle Worker).
@@ -14,6 +15,8 @@ A fully automated bot for farming games on [RichUp.io](https://richup.io/). This
 -   **AFK Votekick Failsafe:** Automatically handles frozen or inactive players by triggering a votekick if the game stalls for 35 seconds.
 -   **Memory & CPU Optimized:** Employs console-log memory management and zero-reflow DOM navigation (eliminating layout thrashing) for completely lag-free infinite running.
 -   **Sandbox Compatible:** Works flawlessly with Tampermonkey/Greasemonkey strict security modes via `unsafeWindow` and React unwrapping.
+
+---
 
 ## 🛠 Installation
 
@@ -36,7 +39,7 @@ You need a userscript manager to run this bot. We recommend:
 3.  Click **▶ Main**.
 4.  Create a "Private Game".
 5.  Set the room to **4 Players**.
-6.  6.  **Important:** Set **Starting Money** to **Max**.
+6.  **Important:** Set **Starting Money** to **Max**.
     *   *This prevents the bot from running out of money and getting stuck early.*
 7.  Copy the Invite Link.
 
@@ -55,10 +58,12 @@ You need a userscript manager to run this bot. We recommend:
     *   The bot uses a Web Worker to fight throttling, but keeping it visible (even slightly) is safer.
     *   You need one Keep-Alive tab for your Main session and one for your Alts (Incognito).
 
-*   **Bankruptcy:**
-    *   Alts are configured to automatically **Bankrupt** after **70 turns**.
-    *   This speeds up the farming process significantly.
-    *   Logic: At turn 70, the bot will click "Declare Bankruptcy", confirm it, restart, and rejoin the next game.
+*   **Bankruptcy & AFK Failsafe:**
+    *   Alts are configured to automatically **Bankrupt** after **70 turns**. This speeds up the farming process significantly. At turn 70, the bot will click "Declare Bankruptcy", confirm it, restart, and rejoin the next game.
+    *   If any player goes AFK and the game stalls for more than **35 seconds**, the bot will automatically seek out and click their **Vote Kick** button to prevent the game from soft-locking.
+
+*   **Window Sizing:**
+    *   The bot is fully responsive! You can squash your Alt windows into tiny, narrow slices to fit 3 or 4 of them on one screen. The bot will still successfully click color swatches and buttons.
 
 *   **Console Version:**
     *   If you prefer not to use an extension, you can paste the code from `main.js` or `alts.js` directly into the Browser Console (F12).
